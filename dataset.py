@@ -14,11 +14,39 @@ import os
 import random
 import sys
 
+from PIL import Image
 import cv2
 import numpy as np
+import math
 
 import torch
 from torch.utils.data.dataset import Dataset
+
+
+def load_depth_map(filename):
+    """
+    Read a depth-map
+    :param filename: file name to load
+    :return: image data of depth image
+    """
+    try:
+        img = Image.open(filename)
+        # top 8 bits of depth are packed into green channel and lower 8 bits into blue
+        assert len(img.getbands()) == 3
+        r, g, b = img.split()
+        r = np.asarray(r, np.int32)
+        g = np.asarray(g, np.int32)
+        b = np.asarray(b, np.int32)
+        dpt = np.bitwise_or(np.left_shift(g, 8), b)
+        imgdata = np.asarray(dpt, np.float32)
+        imgdata = (np.clip(imgdata, 0, 2000-1) / 2000 * 256).astype(np.uint8)
+        imgdata = np.repeat(imgdata[:, :, None], 3, axis=-1)
+        # imgdata = cv2.merge([imgdata, imgdata, imgdata])
+    except IOError as e:
+        imgdata = None
+        # imgdata = np.zeros((480, 640), np.float32)
+        print(filename+' file broken.')
+    return imgdata
 
 
 def rand_uniform_strong(min, max):
@@ -78,6 +106,7 @@ def fill_truth_detection(bboxes, num_boxes, classes, flip, dx, dy, sx, sy, net_w
 
     min_w_h = np.array([bboxes[:, 2] - bboxes[:, 0], bboxes[:, 3] - bboxes[:, 1]]).min()
 
+    # 归一化到[0, 1]
     bboxes[:, 0] *= (net_w / sx)
     bboxes[:, 2] *= (net_w / sx)
     bboxes[:, 1] *= (net_h / sy)
@@ -187,27 +216,32 @@ def filter_truth(bboxes, dx, dy, sx, sy, xd, yd):
     bboxes[:, 1] -= dy
     bboxes[:, 3] -= dy
 
-    bboxes[:, 0] = np.clip(bboxes[:, 0], 0, sx)
-    bboxes[:, 2] = np.clip(bboxes[:, 2], 0, sx)
+    in_bboxes = bboxes.copy()
+    in_bboxes[:, 0] = np.clip(bboxes[:, 0], 0, sx)
+    in_bboxes[:, 2] = np.clip(bboxes[:, 2], 0, sx)
+    in_bboxes[:, 1] = np.clip(bboxes[:, 1], 0, sy)
+    in_bboxes[:, 3] = np.clip(bboxes[:, 3], 0, sy)
 
-    bboxes[:, 1] = np.clip(bboxes[:, 1], 0, sy)
-    bboxes[:, 3] = np.clip(bboxes[:, 3], 0, sy)
+    area = (bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])
+    in_area = (in_bboxes[:, 2] - in_bboxes[:, 0]) * (in_bboxes[:, 3] - in_bboxes[:, 1])
+    out_box = list(np.where(in_area/area < 0.5)[0])
 
-    out_box = list(np.where(((bboxes[:, 1] == sy) & (bboxes[:, 3] == sy)) |
-                            ((bboxes[:, 0] == sx) & (bboxes[:, 2] == sx)) |
-                            ((bboxes[:, 1] == 0) & (bboxes[:, 3] == 0)) |
-                            ((bboxes[:, 0] == 0) & (bboxes[:, 2] == 0)))[0])
-    list_box = list(range(bboxes.shape[0]))
+    # out_box = list(np.where(((bboxes[:, 1] == sy) & (bboxes[:, 3] == sy)) |
+    #                         ((bboxes[:, 0] == sx) & (bboxes[:, 2] == sx)) |
+    #                         ((bboxes[:, 1] == 0) & (bboxes[:, 3] == 0)) |
+    #                         ((bboxes[:, 0] == 0) & (bboxes[:, 2] == 0)))[0])
+
+    list_box = list(range(in_bboxes.shape[0]))
     for i in out_box:
         list_box.remove(i)
-    bboxes = bboxes[list_box]
+    in_bboxes = in_bboxes[list_box]
 
-    bboxes[:, 0] += xd
-    bboxes[:, 2] += xd
-    bboxes[:, 1] += yd
-    bboxes[:, 3] += yd
+    in_bboxes[:, 0] += xd
+    in_bboxes[:, 2] += xd
+    in_bboxes[:, 1] += yd
+    in_bboxes[:, 3] += yd
 
-    return bboxes
+    return in_bboxes
 
 
 def blend_truth_mosaic(out_img, img, bboxes, w, h, cut_x, cut_y, i_mixup,
@@ -293,8 +327,12 @@ class Yolo_dataset(Dataset):
                 img_path = random.choice(list(self.truth.keys()))
                 bboxes = np.array(self.truth.get(img_path), dtype=np.float)
                 img_path = os.path.join(self.cfg.dataset_dir, img_path)
-            img = cv2.imread(img_path)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            # img = cv2.imread(img_path)
+            img = load_depth_map(img_path)
+            if img is None:
+                print(img_path)
+                return None, None
+            # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             if img is None:
                 continue
             oh, ow, oc = img.shape
@@ -391,9 +429,12 @@ class Yolo_dataset(Dataset):
         """
         img_path = self.imgs[index]
         bboxes_with_cls_id = np.array(self.truth.get(img_path), dtype=np.float)
-        img = cv2.imread(os.path.join(self.cfg.dataset_dir, img_path))
+        # img = cv2.imread(os.path.join(self.cfg.dataset_dir, img_path))
+        img = load_depth_map(os.path.join(self.cfg.dataset_dir, img_path))
+        if img is None:
+            return None, None
         # img_height, img_width = img.shape[:2]
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         # img = cv2.resize(img, (self.cfg.w, self.cfg.h))
         # img = torch.from_numpy(img.transpose(2, 0, 1)).float().div(255.0).unsqueeze(0)
         num_objs = len(bboxes_with_cls_id)
@@ -403,7 +444,7 @@ class Yolo_dataset(Dataset):
         boxes[..., 2:] = boxes[..., 2:] - boxes[..., :2]  # box width, box height
         target['boxes'] = torch.as_tensor(boxes, dtype=torch.float32)
         target['labels'] = torch.as_tensor(bboxes_with_cls_id[...,-1].flatten(), dtype=torch.int64)
-        target['image_id'] = torch.tensor([get_image_id(img_path)])
+        target['image_id'] = torch.tensor([index])
         target['area'] = (target['boxes'][:,3])*(target['boxes'][:,2])
         target['iscrowd'] = torch.zeros((num_objs,), dtype=torch.int64)
         return img, target
@@ -436,10 +477,21 @@ if __name__ == "__main__":
 
     random.seed(2020)
     np.random.seed(2020)
-    Cfg.dataset_dir = '/mnt/e/Dataset'
+    Cfg.dataset_dir = '/media/sda1/dataset/nyu_hand_dataset_v2/dataset'
     dataset = Yolo_dataset(Cfg.train_label, Cfg)
-    for i in range(100):
+    for i in range(0, len(dataset), 20000):
         out_img, out_bboxes = dataset.__getitem__(i)
+        # print(out_bboxes)
         a = draw_box(out_img.copy(), out_bboxes.astype(np.int32))
         plt.imshow(a.astype(np.int32))
         plt.show()
+
+    # dataset = Yolo_dataset(Cfg.val_label, Cfg, train=False)
+    # for i in range(0, len(dataset), 3000):
+    #     out_img, target = dataset.__getitem__(i)
+    #     out_bboxes = target['boxes'].numpy()
+    #     out_bboxes[:, 2:] += out_bboxes[:, :2]
+    #     print(out_bboxes)
+    #     a = draw_box(out_img.copy(), out_bboxes.astype(np.int32))
+    #     plt.imshow(a.astype(np.int32))
+    #     plt.show()

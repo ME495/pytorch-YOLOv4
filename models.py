@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 from tool.torch_utils import *
 from tool.yolo_layer import YoloLayer
+from PIL import Image
 
 
 class Mish(torch.nn.Module):
@@ -449,6 +450,32 @@ class Yolov4(nn.Module):
         return output
 
 
+def load_depth_map(filename):
+    """
+    Read a depth-map
+    :param filename: file name to load
+    :return: image data of depth image
+    """
+    try:
+        img = Image.open(filename)
+        # top 8 bits of depth are packed into green channel and lower 8 bits into blue
+        assert len(img.getbands()) == 3
+        r, g, b = img.split()
+        r = np.asarray(r, np.int32)
+        g = np.asarray(g, np.int32)
+        b = np.asarray(b, np.int32)
+        dpt = np.bitwise_or(np.left_shift(g, 8), b)
+        imgdata = np.asarray(dpt, np.float32)
+        imgdata = (np.clip(imgdata, 0, 2000-1) / 2000 * 256).astype(np.uint8)
+        imgdata = np.repeat(imgdata[:, :, None], 3, axis=-1)
+        # imgdata = cv2.merge([imgdata, imgdata, imgdata])
+    except IOError as e:
+        imgdata = None
+        # imgdata = np.zeros((480, 640), np.float32)
+        print(filename+' file broken.')
+    return imgdata
+
+
 if __name__ == "__main__":
     import sys
     import cv2
@@ -464,14 +491,15 @@ if __name__ == "__main__":
         n_classes = int(sys.argv[1])
         weightfile = sys.argv[2]
         imgfile = sys.argv[3]
-        height = sys.argv[4]
+        height = int(sys.argv[4])
         width = int(sys.argv[5])
-        namesfile = int(sys.argv[6])
+        namesfile = sys.argv[6]
     else:
         print('Usage: ')
         print('  python models.py num_classes weightfile imgfile namefile')
 
-    model = Yolov4(yolov4conv137weight=None, n_classes=n_classes, inference=True)
+    model = Yolov4(yolov4conv137weight='yolov4.conv.137.pth', n_classes=n_classes, inference=True)
+    model = nn.DataParallel(model)
 
     pretrained_dict = torch.load(weightfile, map_location=torch.device('cuda'))
     model.load_state_dict(pretrained_dict)
@@ -480,7 +508,8 @@ if __name__ == "__main__":
     if use_cuda:
         model.cuda()
 
-    img = cv2.imread(imgfile)
+    # img = cv2.imread(imgfile)
+    img = load_depth_map(imgfile)
 
     # Inference input size is 416*416 does not mean training size is the same
     # Training size could be 608*608 or even other sizes

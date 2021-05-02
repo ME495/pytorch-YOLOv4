@@ -192,7 +192,7 @@ class Yolo_loss(nn.Module):
             truth_j = truth_j_all[b, :n]
 
             # calculate iou between truth and reference anchors
-            anchor_ious_all = bboxes_iou(truth_box.cpu(), self.ref_anchors[output_id], CIoU=True)
+            anchor_ious_all = bboxes_iou(truth_box.cpu(), self.ref_anchors[output_id], CIoU=True) # (N, K)
 
             # temp = bbox_iou(truth_box.cpu(), self.ref_anchors[output_id])
 
@@ -246,8 +246,10 @@ class Yolo_loss(nn.Module):
             output[..., np.r_[:2, 4:n_ch]] = torch.sigmoid(output[..., np.r_[:2, 4:n_ch]])
 
             pred = output[..., :4].clone()
+            # 预测anchor中心
             pred[..., 0] += self.grid_x[output_id]
             pred[..., 1] += self.grid_y[output_id]
+            # 预测bbx宽度和高度
             pred[..., 2] = torch.exp(pred[..., 2]) * self.anchor_w[output_id]
             pred[..., 3] = torch.exp(pred[..., 3]) * self.anchor_h[output_id]
 
@@ -278,6 +280,8 @@ def collate(batch):
     images = []
     bboxes = []
     for img, box in batch:
+        if img is None:
+            continue
         images.append([img])
         bboxes.append([box])
     images = np.concatenate(images, axis=0)
@@ -288,7 +292,7 @@ def collate(batch):
     return images, bboxes
 
 
-def train(model, device, config, epochs=5, batch_size=1, save_cp=True, log_step=20, img_scale=0.5):
+def train(model, device, config, epochs=5, batch_size=1, save_cp=True, log_step=1, img_scale=0.5):
     train_dataset = Yolo_dataset(config.train_label, config, train=True)
     val_dataset = Yolo_dataset(config.val_label, config, train=False)
 
@@ -334,8 +338,10 @@ def train(model, device, config, epochs=5, batch_size=1, save_cp=True, log_step=
             factor = 1.0
         elif i < config.steps[1]:
             factor = 0.1
-        else:
+        elif i < config.steps[2]:
             factor = 0.01
+        else:
+            factor = 0.001
         return factor
 
     if config.TRAIN_OPTIMIZER.lower() == 'adam':
@@ -403,12 +409,12 @@ def train(model, device, config, epochs=5, batch_size=1, save_cp=True, log_step=
                                         'loss_l2': loss_l2.item(),
                                         'lr': scheduler.get_lr()[0] * config.batch
                                         })
-                    logging.debug('Train step_{}: loss : {},loss xy : {},loss wh : {},'
-                                  'loss obj : {}，loss cls : {},loss l2 : {},lr : {}'
-                                  .format(global_step, loss.item(), loss_xy.item(),
-                                          loss_wh.item(), loss_obj.item(),
-                                          loss_cls.item(), loss_l2.item(),
-                                          scheduler.get_lr()[0] * config.batch))
+                    # logging.debug('Train step_{}: loss : {},loss xy : {},loss wh : {},'
+                    #               'loss obj : {}，loss cls : {},loss l2 : {},lr : {}'
+                    #               .format(global_step, loss.item(), loss_xy.item(),
+                    #                       loss_wh.item(), loss_obj.item(),
+                    #                       loss_cls.item(), loss_l2.item(),
+                    #                       scheduler.get_lr()[0] * config.batch))
 
                 pbar.update(images.shape[0])
 
@@ -535,13 +541,14 @@ def get_args(**kwargs):
                         help='Learning rate', dest='learning_rate')
     parser.add_argument('-f', '--load', dest='load', type=str, default=None,
                         help='Load model from a .pth file')
-    parser.add_argument('-g', '--gpu', metavar='G', type=str, default='-1',
+    parser.add_argument('-g', '--gpu', metavar='G', type=str, default='0, 1',
                         help='GPU', dest='gpu')
-    parser.add_argument('-dir', '--data-dir', type=str, default=None,
+    parser.add_argument('-dir', '--data-dir', type=str, default='/media/sda1/dataset/nyu_hand_dataset_v2/dataset',
                         help='dataset dir', dest='dataset_dir')
     parser.add_argument('-pretrained', type=str, default=None, help='pretrained yolov4.conv.137')
-    parser.add_argument('-classes', type=int, default=80, help='dataset classes')
-    parser.add_argument('-train_label_path', dest='train_label', type=str, default='train.txt', help="train label path")
+    parser.add_argument('-classes', type=int, default=1, help='dataset classes')
+    parser.add_argument('-train_label_path', dest='train_label', type=str, default='data/nyu_train_label.txt',
+                        help="train label path")
     parser.add_argument(
         '-optimizer', type=str, default='adam',
         help='training optimizer',
@@ -583,7 +590,7 @@ def init_logger(log_file=None, log_dir=None, log_level=logging.INFO, mode='w', s
     # 此处不能使用logging输出
     print('log file path:' + log_file)
 
-    logging.basicConfig(level=logging.DEBUG,
+    logging.basicConfig(level=logging.INFO,
                         format=fmt,
                         filename=log_file,
                         filemode=mode)
