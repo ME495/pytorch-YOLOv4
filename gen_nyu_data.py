@@ -22,7 +22,7 @@ def load_annotation(dataset_dir, phase):
 def gen_data(dataset_dir, phase, output_path, fx, fy):
     print('Generate {} data.'.format(phase))
     joint_2d, depth_name = load_annotation(dataset_dir, phase)
-    step = 3 if phase == 'train' else 3
+    step = 10 if phase == 'train' else 10
     joint_2d = joint_2d[::step]
     depth_name = depth_name[::step]
     print(joint_2d.shape[0])

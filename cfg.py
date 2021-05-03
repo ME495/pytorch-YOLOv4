@@ -19,12 +19,12 @@ _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 Cfg = EasyDict()
 
 Cfg.use_darknet_cfg = False
-Cfg.cfgfile = os.path.join(_BASE_DIR, 'cfg', 'yolov4.cfg')
+Cfg.cfgfile = os.path.join(_BASE_DIR, 'cfg', 'yolov4-tiny.cfg')
 
 # Cfg.batch = 128
 # Cfg.subdivisions = 16
-Cfg.batch = 64
-Cfg.subdivisions = 8
+Cfg.batch = 32
+Cfg.subdivisions = 4
 Cfg.width = 608
 Cfg.height = 608
 Cfg.channels = 3
@@ -39,7 +39,8 @@ Cfg.learning_rate = 0.00261
 Cfg.burn_in = 0
 Cfg.max_batches = 500500
 # Cfg.steps = [70000, 140000, 180000]
-Cfg.steps = [8750, 17500, 22500]
+# Cfg.steps = [8750, 17500, 22500]
+Cfg.steps = [6820, 13640, 204600]
 Cfg.policy = Cfg.steps
 Cfg.scales = .1, .1
 
@@ -56,7 +57,7 @@ Cfg.flip = 0
 Cfg.blur = 0
 Cfg.gaussian = 0
 Cfg.boxes = 4  # box num
-Cfg.TRAIN_EPOCHS = 30
+Cfg.TRAIN_EPOCHS = 40
 Cfg.train_label = os.path.join(_BASE_DIR, 'data', 'nyu_train_label.txt')
 Cfg.val_label = os.path.join(_BASE_DIR, 'data' ,'nyu_test_label.txt')
 # Cfg.val_label = os.path.join(_BASE_DIR, 'data' ,'nyu_train_label.txt')

@@ -238,7 +238,6 @@ class Yolo_loss(nn.Module):
             batchsize = output.shape[0]
             fsize = output.shape[2]
             n_ch = 5 + self.n_classes
-
             output = output.view(batchsize, self.n_anchors, n_ch, fsize, fsize)
             output = output.permute(0, 1, 3, 4, 2)  # .contiguous()
 
@@ -622,8 +621,9 @@ if __name__ == "__main__":
     else:
         model = Yolov4(cfg.pretrained, n_classes=cfg.classes)
 
-    if torch.cuda.device_count() > 1:
-        model = torch.nn.DataParallel(model)
+    # if torch.cuda.device_count() > 1:
+    #     model = torch.nn.DataParallel(model)
+    model = torch.nn.DataParallel(model)
     model.to(device=device)
 
     try:
@@ -632,7 +632,7 @@ if __name__ == "__main__":
               epochs=cfg.TRAIN_EPOCHS,
               device=device, )
     except KeyboardInterrupt:
-        torch.save(model.state_dict(), 'INTERRUPTED.pth')
+        torch.save(model.module.state_dict(), 'INTERRUPTED.pth')
         logging.info('Saved interrupt')
         try:
             sys.exit(0)
